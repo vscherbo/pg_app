@@ -1,12 +1,13 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-    A data exchange with Frontol 5
+    PG application
 """
 
 import time
 import logging
 import psycopg2
+import pdb
 
 LOG_FORMAT = '[%(filename)-21s:%(lineno)4s - %(funcName)20s()]\
  %(levelname)-7s | %(asctime)-15s | %(message)s'
@@ -47,7 +48,20 @@ class PGapp():
                 time.sleep(reconnect_period)
 
 
-    def do_query(self, query):
+    def run_query(self, query):
+        """ execute query
+            does not fetch
+        """
+        try:
+            self.curs.execute(query)
+        except psycopg2.Error as exc:
+            logging.exception('PG error=%s', exc.pgcode)
+            res = exc.pgcode
+        else:
+            res = 0
+        return res
+
+    def do_query(self, query, reconnect=False):
         """ execute query
             does not fetch
         """
@@ -55,13 +69,30 @@ class PGapp():
         try:
             self.curs.execute(query)
         except psycopg2.OperationalError as exc:
-            if exc.pgcode in ('57P01', '57P02', '57P03'):
+            if reconnect and exc.pgcode in ('57P01', '57P02', '57P03'):
                 self.wait_pg_connect()
+            else:
+                logging.exception('PG OperationalError=%s', exc.pgcode)
         except psycopg2.Error as exc:
             logging.exception('PG error=%s', exc.pgcode)
         else:
             res = True
         return res
+
+    def copy_expert(self, cmd_copy, arg_io):
+        """ run PG \\COPY command
+        """
+        res = False
+        try:
+            self.curs.copy_expert(cmd_copy, arg_io)
+            self.conn.commit()
+            logging.info('\\COPY commited')
+        except psycopg2.OperationalError:
+            logging.exception('\\COPY command')
+        else:  # \COPY commited
+            res = True
+        return res
+
 
 def main():
     """ just main
@@ -71,10 +102,25 @@ def main():
     pg_app.wait_pg_connect()
     pg_app.set_session(autocommit=True)
 
+    while True:
+        res = pg_app.run_query('SELECT COUNT(*) FROM arc_constants;')
+        if res == 0:
+            break
+        elif res in ('57P01', '57P02', '57P03'):
+            # try reconnect in loop
+            pg_app.wait_pg_connect()
+        else:
+            break
+    data = pg_app.curs.fetchall()
+    logging.info('data=%s', data[0])
+    pdb.set_trace()
 
 if __name__ == '__main__':
+    import os
+    import sys
     LOG_DIR = './'
-    logging.basicConfig(filename=LOG_DIR + '/ftd.log', format=LOG_FORMAT,
+    PROGNAME = os.path.splitext(os.path.basename(sys.argv[0]))[0]
+    logging.basicConfig(filename='{}/{}.log'.format(LOG_DIR, PROGNAME), format=LOG_FORMAT,
                         level=logging.DEBUG)
     logging.info('config read')
     main()
