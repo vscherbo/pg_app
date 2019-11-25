@@ -6,8 +6,10 @@
 
 import time
 import logging
-import psycopg2
 import pdb
+
+import psycopg2
+import psycopg2.extras
 
 LOG_FORMAT = '[%(filename)-21s:%(lineno)4s - %(funcName)20s()]\
  %(levelname)-7s | %(asctime)-15s | %(message)s'
@@ -24,6 +26,7 @@ class PGapp():
         self.dbname = pg_db or pg_user
         self.conn = None
         self.curs = None
+        self.curs_dict = None
 
     def set_session(self, **kwargs):
         """ wrap psycopg2 set_session()
@@ -41,6 +44,7 @@ class PGapp():
                 self.conn = psycopg2.connect("host='{}' dbname='{}' \
     user='{}'".format(self.host, self.dbname, self.user))
                 self.curs = self.conn.cursor()
+                self.curs_dict = self.conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
                 logging.info('PG %s connected', self.host)
                 break
             except psycopg2.Error:
@@ -48,12 +52,15 @@ class PGapp():
                 time.sleep(reconnect_period)
 
 
-    def run_query(self, query):
+    def run_query(self, query, dict_mode=False):
         """ execute query
             does not fetch
         """
         try:
-            self.curs.execute(query)
+            if dict_mode:
+                self.curs_dict.execute(query)
+            else:
+                self.curs.execute(query)
         except psycopg2.Error as exc:
             logging.exception('PG error=%s', exc.pgcode)
             res = exc.pgcode
