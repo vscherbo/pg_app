@@ -14,6 +14,12 @@ import psycopg2.extras
 LOG_FORMAT = '[%(filename)-21s:%(lineno)4s - %(funcName)20s()]\
  %(levelname)-7s | %(asctime)-15s | %(message)s'
 
+class PGException(Exception):
+    """ PGapp exception class """
+    def __init__(self, message):
+        super(PGException, self).__init__(message)
+        self.message = message
+        logging.exception('PGException')
 
 class PGapp():
     """ class for PG app
@@ -96,6 +102,8 @@ class PGapp():
             logging.info('\\COPY commited')
         except psycopg2.OperationalError:
             logging.exception('\\COPY command')
+        except:
+            raise PGException('\\COPY failed')
         else:  # \COPY commited
             res = True
         return res
