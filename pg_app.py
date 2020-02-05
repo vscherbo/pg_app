@@ -19,7 +19,7 @@ class PGException(Exception):
     def __init__(self, message):
         super(PGException, self).__init__(message)
         self.message = message
-        logging.exception('PGException')
+        logging.warning('PGException')
 
 class PGapp():
     """ class for PG app
@@ -68,6 +68,7 @@ class PGapp():
             else:
                 self.curs.execute(query)
         except psycopg2.Error as exc:
+            self.conn.rollback()
             logging.exception('PG error=%s', exc.pgcode)
             res = exc.pgcode
         else:
@@ -87,6 +88,7 @@ class PGapp():
             else:
                 logging.exception('PG OperationalError=%s', exc.pgcode)
         except psycopg2.Error as exc:
+            self.conn.rollback()
             logging.exception('PG error=%s', exc.pgcode)
         else:
             res = True
@@ -102,8 +104,10 @@ class PGapp():
             logging.info('\\COPY commited')
         except psycopg2.OperationalError:
             logging.exception('\\COPY command')
-        except:
-            raise PGException('\\COPY failed')
+        except psycopg2.Error:
+            logging.exception('\\COPY failed! Rolling back')
+            self.conn.rollback()
+            #raise PGException('\\COPY failed')
         else:  # \COPY commited
             res = True
         return res
