@@ -37,13 +37,36 @@ class PGapp():
     def set_session(self, **kwargs):
         """ wrap psycopg2 set_session()
         """
-        self.conn.set_session(**kwargs)
+        if self.conn:
+            self.conn.set_session(**kwargs)
+
+    def pg_connect(self):
+        """
+        Try to connect to PG
+        """
+        logging.info("Trying connection to pg_host=%s as pg_user=%s", self.host, self.user)
+        res = False
+        try:
+            # password='XXXX' - .pgpass
+            self.conn = psycopg2.connect("host='{}' dbname='{}' \
+user='{}'".format(self.host, self.dbname, self.user))
+            self.curs = self.conn.cursor()
+            self.curs_dict = self.conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+            res = True
+            logging.info('PG %s connected', self.host)
+        except psycopg2.Error:
+            logging.error("Connection failed")
+        else:
+            res = True
+        return res
 
     def wait_pg_connect(self, reconnect_period=5):
         """
         Loop until an connection to PG is available.
         """
-        while True:
+        while not self.pg_connect():
+            time.sleep(reconnect_period)
+            """
             logging.info("Trying connection to PG.")
             try:
                 # password='XXXX' - .pgpass
@@ -56,12 +79,15 @@ class PGapp():
             except psycopg2.Error:
                 logging.warning("Connection failed. Retrying in 10 seconds")
                 time.sleep(reconnect_period)
+            """
 
 
     def run_query(self, query, dict_mode=False):
         """ execute query
             does not fetch
         """
+        if not self.conn:
+            return -999
         try:
             if dict_mode:
                 self.curs_dict.execute(query)
@@ -79,6 +105,8 @@ class PGapp():
         """ execute query
             does not fetch
         """
+        if not self.conn:
+            return False
         res = False
         try:
             self.curs.execute(query)
@@ -94,6 +122,29 @@ class PGapp():
             res = True
         return res
 
+    def copy_from(self, *args, **kwargs):
+        """ run PG \\COPY command
+        """
+        res = False
+        loc_reconnect = kwargs.pop('reconnect', False)
+        try:
+            self.curs.copy_from(*args, **kwargs)
+            self.conn.commit()
+            logging.info('\\COPY-from commited')
+        except psycopg2.OperationalError as exc:
+            if loc_reconnect and exc.pgcode in ('57P01', '57P02', '57P03'):
+                self.wait_pg_connect()
+                res = True
+            else:
+                logging.exception('PG \\COPY-from OperationalError=%s', exc.pgcode)
+        except psycopg2.Error:
+            logging.exception('\\COPY-from failed! Rolling back')
+            self.conn.rollback()
+            #raise PGException('\\COPY failed')
+        else:  # \COPY commited
+            res = True
+        return res
+
     def copy_expert(self, cmd_copy, arg_io):
         """ run PG \\COPY command
         """
@@ -101,17 +152,25 @@ class PGapp():
         try:
             self.curs.copy_expert(cmd_copy, arg_io)
             self.conn.commit()
-            logging.info('\\COPY commited')
+            logging.info('\\COPY-expert commited')
         except psycopg2.OperationalError:
-            logging.exception('\\COPY command')
+            logging.exception('\\COPY-expert command')
         except psycopg2.Error:
-            logging.exception('\\COPY failed! Rolling back')
+            logging.exception('\\COPY-expert failed! Rolling back')
             self.conn.rollback()
             #raise PGException('\\COPY failed')
         else:  # \COPY commited
             res = True
         return res
 
+    def pg_close(self):
+        """ Close cursors and connection """
+        if self.curs:
+            self.curs.close()
+        if self.curs_dict:
+            self.curs_dict.close()
+        if self.conn:
+            self.conn.close()
 
 def main():
     """ just main
@@ -126,6 +185,7 @@ def main():
         if res == 0:
             break
         elif res in ('57P01', '57P02', '57P03'):
+            # admin_shutdown, crash_shutdown, cannot_connect_now
             # try reconnect in loop
             pg_app.wait_pg_connect()
         else:
