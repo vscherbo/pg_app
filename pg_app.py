@@ -54,8 +54,8 @@ user='{}'".format(self.host, self.dbname, self.user))
             self.curs_dict = self.conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
             res = True
             logging.info('PG %s connected', self.host)
-        except psycopg2.Error:
-            logging.error("Connection failed")
+        except psycopg2.Error as err:
+            logging.error("Connection failed, ERROR=%s", err)
         else:
             res = True
         return res
@@ -125,7 +125,7 @@ user='{}'".format(self.host, self.dbname, self.user))
     def copy_from(self, *args, **kwargs):
         """ run PG \\COPY command
         """
-        res = False
+        res = 0
         loc_reconnect = kwargs.pop('reconnect', False)
         try:
             self.curs.copy_from(*args, **kwargs)
@@ -134,7 +134,7 @@ user='{}'".format(self.host, self.dbname, self.user))
         except psycopg2.OperationalError as exc:
             if loc_reconnect and exc.pgcode in ('57P01', '57P02', '57P03'):
                 self.wait_pg_connect()
-                res = True
+                res = 2
             else:
                 logging.exception('PG \\COPY-from OperationalError=%s', exc.pgcode)
         except psycopg2.Error:
@@ -142,7 +142,7 @@ user='{}'".format(self.host, self.dbname, self.user))
             self.conn.rollback()
             #raise PGException('\\COPY failed')
         else:  # \COPY commited
-            res = True
+            res = 1
         return res
 
     def copy_expert(self, cmd_copy, arg_io):
@@ -182,9 +182,7 @@ def main():
 
     while True:
         res = pg_app.run_query('SELECT COUNT(*) FROM arc_constants;')
-        if res == 0:
-            break
-        elif res in ('57P01', '57P02', '57P03'):
+        if res in ('57P01', '57P02', '57P03'):
             # admin_shutdown, crash_shutdown, cannot_connect_now
             # try reconnect in loop
             pg_app.wait_pg_connect()
