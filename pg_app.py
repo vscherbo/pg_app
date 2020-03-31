@@ -43,13 +43,14 @@ class PGapp():
     def pg_connect(self):
         """
         Try to connect to PG
+        TODO: kwargs
         """
         logging.info("Trying connection to pg_host=%s as pg_user=%s", self.host, self.user)
         res = False
         try:
             # password='XXXX' - .pgpass
             self.conn = psycopg2.connect("host='{}' dbname='{}' \
-user='{}'".format(self.host, self.dbname, self.user))
+user='{}' connect_timeout=3".format(self.host, self.dbname, self.user))
             self.curs = self.conn.cursor()
             self.curs_dict = self.conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
             res = True
@@ -106,7 +107,10 @@ user='{}'".format(self.host, self.dbname, self.user))
             does not fetch
         """
         if not self.conn:
-            return False
+            if reconnect:
+                self.wait_pg_connect()
+            else:
+                return False
         res = False
         try:
             self.curs.execute(query)
@@ -125,8 +129,13 @@ user='{}'".format(self.host, self.dbname, self.user))
     def copy_from(self, *args, **kwargs):
         """ run PG \\COPY command
         """
-        res = 0
+        res = 0  # failed
         loc_reconnect = kwargs.pop('reconnect', False)
+        if not self.conn:
+            if loc_reconnect:
+                self.wait_pg_connect()
+            else:
+                return res
         try:
             self.curs.copy_from(*args, **kwargs)
             self.conn.commit()
@@ -190,7 +199,7 @@ def main():
             break
     data = pg_app.curs.fetchall()
     logging.info('data=%s', data[0])
-    pdb.set_trace()
+    #pdb.set_trace()
 
 if __name__ == '__main__':
     import os
