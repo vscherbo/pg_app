@@ -40,7 +40,7 @@ class PGapp():
         if self.conn:
             self.conn.set_session(**kwargs)
 
-    def pg_connect(self):
+    def pg_connect(self, cursor_factory=psycopg2.extras.DictCursor):
         """
         Try to connect to PG
         TODO: kwargs
@@ -52,7 +52,8 @@ class PGapp():
             self.conn = psycopg2.connect("host='{}' dbname='{}' \
 user='{}' connect_timeout=3".format(self.host, self.dbname, self.user))
             self.curs = self.conn.cursor()
-            self.curs_dict = self.conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+            #self.curs_dict = self.conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+            self.curs_dict = self.conn.cursor(cursor_factory=cursor_factory)
             res = True
             logging.info('PG %s connected', self.host)
         except psycopg2.Error as err:
