@@ -116,7 +116,7 @@ user='{}' connect_timeout=3".format(self.host, self.dbname, self.user))
         try:
             self.curs.execute(query)
         except psycopg2.OperationalError as exc:
-            if reconnect and exc.pgcode in ('57P01', '57P02', '57P03'):
+            if reconnect and exc.pgcode in (None, '57P01', '57P02', '57P03'):
                 self.wait_pg_connect()
             else:
                 logging.exception('PG OperationalError=%s', exc.pgcode)
