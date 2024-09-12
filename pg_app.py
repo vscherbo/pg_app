@@ -4,9 +4,8 @@
     PG application
 """
 
-import time
 import logging
-import pdb
+import time
 
 import psycopg2
 import psycopg2.extras
@@ -17,7 +16,7 @@ LOG_FORMAT = '[%(filename)-21s:%(lineno)4s - %(funcName)20s()]\
 class PGException(Exception):
     """ PGapp exception class """
     def __init__(self, message):
-        super(PGException, self).__init__(message)
+        super().__init__(message)
         self.message = message
         logging.warning('PGException')
 
@@ -40,7 +39,7 @@ class PGapp():
         if self.conn:
             self.conn.set_session(**kwargs)
 
-    def pg_connect(self, cursor_factory=psycopg2.extras.DictCursor):
+    def pg_connect(self, cursor_factory=psycopg2.extras.DictCursor, connect_timeout=3):
         """
         Try to connect to PG
         TODO: kwargs
@@ -49,8 +48,9 @@ class PGapp():
         res = False
         try:
             # password='XXXX' - .pgpass
-            self.conn = psycopg2.connect("host='{}' dbname='{}' \
-user='{}' connect_timeout=3".format(self.host, self.dbname, self.user))
+            self.conn = psycopg2.connect(f"host='{self.host}'\
+                    dbname='{self.dbname}' user='{self.user}'\
+                    connect_timeout={connect_timeout}")
             self.curs = self.conn.cursor()
             #self.curs_dict = self.conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
             self.curs_dict = self.conn.cursor(cursor_factory=cursor_factory)
@@ -68,21 +68,6 @@ user='{}' connect_timeout=3".format(self.host, self.dbname, self.user))
         """
         while not self.pg_connect():
             time.sleep(reconnect_period)
-            """
-            logging.info("Trying connection to PG.")
-            try:
-                # password='XXXX' - .pgpass
-                self.conn = psycopg2.connect("host='{}' dbname='{}' \
-    user='{}'".format(self.host, self.dbname, self.user))
-                self.curs = self.conn.cursor()
-                self.curs_dict = self.conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
-                logging.info('PG %s connected', self.host)
-                break
-            except psycopg2.Error:
-                logging.warning("Connection failed. Retrying in 10 seconds")
-                time.sleep(reconnect_period)
-            """
-
 
     def run_query(self, query, dict_mode=False):
         """ execute query
@@ -103,7 +88,7 @@ user='{}' connect_timeout=3".format(self.host, self.dbname, self.user))
             res = 0
         return res
 
-    def do_query(self, query, reconnect=False):
+    def do_query(self, query, reconnect=False, dict_mode=False):
         """ execute query
             does not fetch
         """
@@ -114,7 +99,10 @@ user='{}' connect_timeout=3".format(self.host, self.dbname, self.user))
                 return False
         res = False
         try:
-            self.curs.execute(query)
+            if dict_mode:
+                self.curs_dict.execute(query)
+            else:
+                self.curs.execute(query)
         except psycopg2.OperationalError as exc:
             if reconnect and exc.pgcode in (None, '57P01', '57P02', '57P03'):
                 self.wait_pg_connect()
@@ -190,24 +178,19 @@ def main():
     pg_app.wait_pg_connect()
     pg_app.set_session(autocommit=True)
 
-    while True:
-        res = pg_app.run_query('SELECT COUNT(*) FROM arc_constants;')
-        if res in ('57P01', '57P02', '57P03'):
-            # admin_shutdown, crash_shutdown, cannot_connect_now
-            # try reconnect in loop
-            pg_app.wait_pg_connect()
-        else:
-            break
+    while not pg_app.do_query('SELECT COUNT(*) FROM arc_constants;',
+            reconnect=True):
+        time.sleep(3)
+
     data = pg_app.curs.fetchall()
     logging.info('data=%s', data[0])
-    #pdb.set_trace()
 
 if __name__ == '__main__':
     import os
     import sys
     LOG_DIR = './'
     PROGNAME = os.path.splitext(os.path.basename(sys.argv[0]))[0]
-    logging.basicConfig(filename='{}/{}.log'.format(LOG_DIR, PROGNAME), format=LOG_FORMAT,
+    logging.basicConfig(filename=f'{LOG_DIR}/{PROGNAME}.log', format=LOG_FORMAT,
                         level=logging.DEBUG)
     logging.info('config read')
     main()
