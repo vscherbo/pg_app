@@ -20,18 +20,47 @@ class PGException(Exception):
         self.message = message
         logging.warning('PGException')
 
+class LoggingCursor(psycopg2.extensions.cursor):
+    """ cursor with logging """
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.logger = None
+
+    def initialize(self, logger):
+        """ initialize a logger """
+        self.logger = logger
+
+    def fetchone(self):
+        """ fetchone and logging """
+        try:
+            res = psycopg2.extensions.cursor.fetchone(self)
+            self.logger.info(res)
+        except Exception as exc:
+            self.logger.error(f"{exc.__class__.__name__}: {exc}")
+            raise
+        return res
+
+    def fetchmany(self, size):
+        """ fetchmany and logging """
+
 class PGapp():
     """ class for PG app
     """
     def __init__(self, pg_host, pg_user, pg_db=None, pg_port=5432):
-        logging.getLogger(__name__).addHandler(logging.NullHandler())
-        self.host = pg_host
-        self.user = pg_user
-        self.port = pg_port
-        self.dbname = pg_db or pg_user
+        # logging.getLogger(__name__).addHandler(logging.NullHandler())
+        self.logger = logging.getLogger(__name__)
+        self.logger.addHandler(logging.NullHandler())
+        self.conn_settings = {
+                "host": pg_host,
+                "port": pg_port,
+                "database": pg_db or pg_user,
+                "user": pg_user
+                }
+
         self.conn = None
         self.curs = None
         self.curs_dict = None
+        self.lcurs = None
 
     def set_session(self, **kwargs):
         """ wrap psycopg2 set_session()
@@ -44,18 +73,21 @@ class PGapp():
         Try to connect to PG
         TODO: kwargs
         """
-        logging.info("Trying connection to pg_host=%s as pg_user=%s", self.host, self.user)
+        logging.info("Trying connection to pg_host=%s as pg_user=%s", \
+                self.conn_settings["host"], self.conn_settings["user"])
         res = False
         try:
             # password='XXXX' - .pgpass
-            self.conn = psycopg2.connect(f"host='{self.host}'\
-                    dbname='{self.dbname}' user='{self.user}'\
-                    connect_timeout={connect_timeout}")
+            self.conn = psycopg2.connect(connection_factory=psycopg2.extras.LoggingConnection,
+                    connect_timeout=connect_timeout,
+                    **self.conn_settings)
+            self.conn.initialize(self.logger)
             self.curs = self.conn.cursor()
-            #self.curs_dict = self.conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
+            self.lcurs = self.conn.cursor(cursor_factory=LoggingCursor)
+            self.lcurs.initialize(self.logger)
             self.curs_dict = self.conn.cursor(cursor_factory=cursor_factory)
             res = True
-            logging.info('PG %s connected', self.host)
+            logging.info('PG %s connected', self.conn_settings["host"])
         except psycopg2.Error as err:
             logging.error("Connection failed, ERROR=%s", err)
         else:
@@ -163,6 +195,8 @@ class PGapp():
 
     def pg_close(self):
         """ Close cursors and connection """
+        if self.lcurs:
+            self.lcurs.close()
         if self.curs:
             self.curs.close()
         if self.curs_dict:
@@ -178,12 +212,16 @@ def main():
     pg_app.wait_pg_connect()
     pg_app.set_session(autocommit=True)
 
-    while not pg_app.do_query('SELECT COUNT(*) FROM arc_constants;',
-            reconnect=True):
-        time.sleep(3)
+    # while not pg_app.do_query('SELECT COUNT(*) FROM arc_constants;',
+    # while not pg_app.do_query("SELECT * FROM arc_constants WHERE const_name='photo_path';",
+    #        reconnect=True):
+    #    time.sleep(3)
 
-    data = pg_app.curs.fetchall()
-    logging.info('data=%s', data[0])
+    pg_app.lcurs.execute("SELECT * FROM arc_constants WHERE const_name='photo_path';")
+
+    logging.debug('lcurs=%s', pg_app.lcurs)
+    data = pg_app.lcurs.fetchone()
+    logging.info('data=%s', data)
 
 if __name__ == '__main__':
     import os
