@@ -2,43 +2,18 @@
 """
 Modern PostgreSQL connection manager with logging, retry mechanism, and Unicode support.
 """
-# pylint: disable=broad-exception-caught,line-too-long,too-many-arguments,unnecessary-dunder-call
+# pylint: disable=broad-exception-caught,line-too-long,too-many-arguments
 
 import logging
 import time
 from contextlib import contextmanager
-from dataclasses import dataclass
-from typing import Callable, List, Optional, TextIO, Union
+from typing import List, Optional, TextIO, Union
 
 import psycopg2
 import psycopg2.extensions
 import psycopg2.extras
 
-
-@dataclass
-class LoggerConfig:
-    """Конфигурация логгера"""
-    log_queries: bool = False
-    log_results: bool = False
-    logger_name: Optional[str] = None
-    log_to_file: Optional[str] = None
-    log_level: int = logging.INFO
-
-
-@dataclass
-class RetryConfig:
-    """Конфигурация повторных попыток"""
-    retry_attempts: int = 3
-    retry_delay: float = 1
-
-
-@dataclass
-class PostgresConfig:
-    """Конфигурация для подключения к PostgreSQL"""
-    dsn: str
-    cursor_factory: Optional[Callable] = None
-    logger_config: Optional[LoggerConfig] = None
-    retry_config: Optional[RetryConfig] = None
+from config import LoggerConfig, PostgresConfig, RetryConfig
 
 
 class PostgresCursor(psycopg2.extensions.cursor):
@@ -208,21 +183,25 @@ class PostgresConnection(psycopg2.extensions.connection):
             logger_config: Конфигурация логгера
             retry_config: Конфигурация повторных попыток
         """
+        self.saved_dsn = dsn
         self.logger = logger_instance or logging.getLogger(__name__)
         self.logger_config = logger_config or LoggerConfig()
         self.retry_config = retry_config or RetryConfig()
 
-        # Если cursor_factory не задан, используем наш расширенный курсор
+        # Создаем соединение без cursor_factory
+        super().__init__(dsn)
 
-        if cursor_factory is None:
-            def factory():
+        # Устанавливаем cursor_factory после инициализации
+
+        if cursor_factory is not None:
+            self.cursor_factory = cursor_factory
+        else:
+            def default_factory():
                 return PostgresCursor(
                     logger_instance=self.logger,
                     logger_config=self.logger_config
                 )
-            cursor_factory = factory
-
-        super().__init__(dsn, cursor_factory=cursor_factory)
+            self.cursor_factory = default_factory
 
     def cursor(self, *args, **kwargs):
         """
@@ -293,13 +272,17 @@ class PostgresConnection(psycopg2.extensions.connection):
                             # Если не удалось откатить, пробуем переподключиться
                             try:
                                 self.close()
-                                self.__init__(self.dsn,
-                                              cursor_factory=self.cursor_factory,
-                                              logger_instance=self.logger,
-                                              logger_config=self.logger_config,
-                                              retry_config=self.retry_config)
                             except Exception:
                                 pass  # Продолжаем попытки
+
+                        new_conn = PostgresConnection(
+                            self.saved_dsn,
+                            cursor_factory=self.cursor_factory,
+                            logger_instance=self.logger,
+                            logger_config=self.logger_config,
+                            retry_config=self.retry_config
+                        )
+                        self.__dict__.update(new_conn.__dict__)
 
                         continue
 
@@ -561,7 +544,7 @@ class PostgresApp:
         try:
             return operation(*args, **kwargs)
         except Exception as e:
-            self.logger.error("Safe execute failed: %s", e)
+            self.logger.error("Safe execute failed: %s", e, exc_info=True)
             return None
 
     def safe_execute_query(self, query, vars_=None, fetch_method='fetchall'):
