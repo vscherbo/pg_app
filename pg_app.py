@@ -75,14 +75,15 @@ class UnicodeLoggingCursor(psycopg2.extras.LoggingCursor):
     def _log(self, msg):
         # Декодируем байты в UTF-8, если это байтовая строка
         if isinstance(msg, bytes):
-            print('isinstance bytes')
+            # print('isinstance bytes')
             try:
                 msg = msg.decode('utf-8')
             except UnicodeDecodeError:
                 # Если не получается декодировать как UTF-8, оставляем как есть
-                print('UnicodeDecodeError')
+                # print('UnicodeDecodeError')
                 pass
-        print(msg)
+
+        # print(msg)
         super()._log(msg)
 
 
