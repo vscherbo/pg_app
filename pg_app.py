@@ -49,6 +49,43 @@ class LoggingCursor1(psycopg2.extensions.cursor):
         """ fetchmany and logging """
 
 
+class UnicodeLoggingConnection(psycopg2.extras.LoggingConnection):
+    """ Для отображения кириллицы """
+
+    def __init__(self, *args, **kwargs):
+        # Инициализируем родительский класс
+        super().__init__(*args, **kwargs)
+        # Устанавливаем factory для курсора
+        self.cursor_factory = UnicodeLoggingCursor
+
+    def filter(self, msg, curs):
+        # Этот метод вызывается для фильтрации сообщений перед логированием
+        # Декодируем байты в UTF-8
+        if isinstance(msg, bytes):
+            try:
+                return msg.decode('utf-8')
+            except UnicodeDecodeError:
+                return str(msg)
+        return msg
+
+
+class UnicodeLoggingCursor(psycopg2.extras.LoggingCursor):
+    """ Для отображения кириллицы """
+
+    def _log(self, msg):
+        # Декодируем байты в UTF-8, если это байтовая строка
+        if isinstance(msg, bytes):
+            print('isinstance bytes')
+            try:
+                msg = msg.decode('utf-8')
+            except UnicodeDecodeError:
+                # Если не получается декодировать как UTF-8, оставляем как есть
+                print('UnicodeDecodeError')
+                pass
+        print(msg)
+        super()._log(msg)
+
+
 class PGapp():
     """ class for PG app
     """
@@ -76,7 +113,9 @@ class PGapp():
         if self.conn:
             self.conn.set_session(**kwargs)
 
-    def pg_connect(self, cursor_factory=psycopg2.extras.DictCursor, connect_timeout=3):
+    # def pg_connect(self, cursor_factory=psycopg2.extras.DictCursor, connect_timeout=3):
+    def pg_connect(self, cursor_factory=UnicodeLoggingCursor, connect_timeout=3,
+                   connection_factory=UnicodeLoggingConnection):
         """
         Try to connect to PG
         TODO: kwargs
@@ -86,14 +125,13 @@ class PGapp():
         res = False
         try:
             # password='XXXX' - .pgpass
-            self.conn = psycopg2.connect(connection_factory=psycopg2.extras.LoggingConnection,
-                                         # cursor_factory=psycopg2.extras.LoggingCursor,
+            # self.conn = psycopg2.connect(connection_factory=psycopg2.extras.LoggingConnection,
+            self.conn = psycopg2.connect(connection_factory=connection_factory,
                                          connect_timeout=connect_timeout,
                                          **self.conn_settings)
             self.conn.initialize(self.logger)
-            # self.curs = self.conn.cursor()
-            self.curs = self.conn.cursor(cursor_factory=psycopg2.extras.LoggingCursor)
-            # self.curs = self.conn.cursor(cursor_factory=LoggingCursor)
+            # self.curs = self.conn.cursor(cursor_factory=psycopg2.extras.LoggingCursor)
+            self.curs = self.conn.cursor(cursor_factory=cursor_factory)
             # self.curs.initialize(self.logger)
 
             # self.lcurs = self.conn.cursor(cursor_factory=LoggingCursor)
@@ -234,9 +272,10 @@ class PGapp():
 def main():
     """ just main
     """
-    pg_app = PGapp('vm-pg-devel.arc.world', 'arc_energo')
+    pg_app = PGapp('vm-pg-clone.arc.world', 'arc_energo')
     # password='XXXX' - .pgpass
-    pg_app.wait_pg_connect()
+    # pg_app.wait_pg_connect()
+    pg_app.pg_connect()
     pg_app.set_session(autocommit=True)
 
     # while not pg_app.do_query('SELECT COUNT(*) FROM arc_constants;',
@@ -247,10 +286,11 @@ def main():
     # pg_app.lcurs.execute("SELECT * FROM arc_constants WHERE const_name='photo_path';")
     # data = pg_app.lcurs.fetchone()
 
-    pg_app.curs.execute("SELECT * FROM arc_constants WHERE const_name='photo_path';")
-    data = pg_app.curs.fetchone()
-
-    logging.info('data=%s', data)
+    # pg_app.curs.execute("SELECT * FROM arc_constants WHERE const_name='photo_path';")
+    pg_app.curs.execute("INSERT INTO arc_constants(const_name, const_value) \
+VALUES ('cyrillic', 'кириллица');")
+    # data = pg_app.curs.fetchone()
+    # logging.info('data=%s', data)
 
 
 if __name__ == '__main__':
